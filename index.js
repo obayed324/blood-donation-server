@@ -23,7 +23,9 @@ async function run() {
   try {
     await client.connect();
     const db = client.db('blood-donation');
-    const users = db.collection('users');
+    const userCollection = db.collection('users');
+    const donationCollection = db.collection("donationRequests");
+
 
     // Create user (on first login)
     app.post('/users', async (req, res) => {
@@ -31,7 +33,7 @@ async function run() {
       const exists = await users.findOne({ uid: user.uid });
       if (exists) return res.send(exists);
 
-      const result = await users.insertOne({
+      const result = await userCollection.insertOne({
         ...user,
         role: 'donor',
         status: 'active',
@@ -41,18 +43,18 @@ async function run() {
       res.send(result);
     });
 
-    
+
     app.get('/users/uid/:uid', async (req, res) => {
-      const user = await users.findOne({ uid: req.params.uid });
+      const user = await userCollection.findOne({ uid: req.params.uid });
       if (!user) return res.status(404).send({ message: 'User not found' });
       res.send(user);
     });
 
-    
+
     app.put('/users/profile', async (req, res) => {
       const { id, name, bloodGroup, district, upazila, avatar } = req.body;
 
-      const result = await users.updateOne(
+      const result = await userCollection.updateOne(
         { _id: new ObjectId(id) },
         {
           $set: {
@@ -69,11 +71,86 @@ async function run() {
       res.send({ success: true, result });
     });
 
-    
+    // Donation related API
+    app.post("/donation-requests", async (req, res) => {
+      try {
+        const request = req.body;
+
+        // 1️⃣ Validate required field
+        if (!request.requesterUid) {
+          return res.status(400).send({ message: "Requester UID missing" });
+        }
+
+        // 2️⃣ Check user status from DB
+        const user = await userCollection.findOne({ uid: request.requesterUid });
+
+        if (!user) {
+          return res.status(404).send({ message: "User not found" });
+        }
+
+        if (user.status !== "active") {
+          return res.status(403).send({
+            message: "Blocked users cannot create donation request"
+          });
+        }
+
+        // 3️⃣ Final donation request object
+        const donationRequest = {
+          requesterUid: request.requesterUid,
+          requesterName: request.requesterName,
+          requesterEmail: request.requesterEmail,
+
+          recipientName: request.recipientName,
+          recipientDistrict: request.recipientDistrict,
+          recipientUpazila: request.recipientUpazila,
+          hospitalName: request.hospitalName,
+          fullAddress: request.fullAddress,
+          bloodGroup: request.bloodGroup,
+          donationDate: request.donationDate,
+          donationTime: request.donationTime,
+          requestMessage: request.requestMessage,
+
+          status: "pending", 
+          donor: {
+            name: null,
+            email: null
+          },
+
+          createdAt: new Date()
+        };
+
+        const result = await donationCollection.insertOne(donationRequest);
+
+        res.status(201).send({
+          success: true,
+          insertedId: result.insertedId
+        });
+      } catch (error) {
+        console.error("Donation Request Error:", error);
+        res.status(500).send({ message: "Internal Server Error" });
+      }
+    });
+
+    app.get("/donation-requests", async (req, res) => {
+      try {
+        const { status } = req.query;
+        const filter = status ? { status: status } : {};
+        const requests = await donationCollection.find(filter).toArray();
+        res.send(requests);
+      } 
+      catch (err) {
+        console.error(err);
+        res.status(500).send({ message: "Internal Server Error" });
+      }
+    });
+
+
+
+
 
     console.log('MongoDB Connected');
-  } 
-  finally {}
+  }
+  finally { }
 }
 
 run().catch(console.dir);
