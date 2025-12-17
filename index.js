@@ -75,12 +75,28 @@ async function run() {
       res.send(result);
     });
 
-
+    //for fetch profile information 
     app.get('/users/uid/:uid', async (req, res) => {
       const user = await userCollection.findOne({ uid: req.params.uid });
       if (!user) return res.status(404).send({ message: 'User not found' });
       res.send(user);
     });
+
+    //for user based login 
+    app.get("/users/role/:uid", async (req, res) => {
+      try {
+        const user = await userCollection.findOne({ uid: req.params.uid });
+
+        if (!user) {
+          return res.status(404).send({ role: "user" });
+        }
+
+        res.send({ role: user.role || "user" });
+      } catch (err) {
+        res.status(500).send({ message: "Internal Server Error" });
+      }
+    });
+
 
 
     app.put('/users/profile', async (req, res) => {
@@ -163,7 +179,7 @@ async function run() {
       }
     });
 
-    app.get("/donation-requests",verifyFBToken, async (req, res) => {
+    app.get("/donation-requests", verifyFBToken, async (req, res) => {
       try {
         const { status } = req.query;
         const filter = status ? { status: status } : {};
@@ -214,6 +230,50 @@ async function run() {
 
       res.send(result);
     });
+
+    // Get donor dashboard data (last 3 requests)
+    app.get("/dashboard/my-donation-requests/:uid", async (req, res) => {
+      const { uid } = req.params;
+
+      try {
+        const requests = await donationCollection
+          .find({ requesterUid: uid })
+          .sort({ createdAt: -1 }) // recent first
+          .limit(3)
+          .toArray();
+
+        res.send(requests);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ message: "Internal Server Error" });
+      }
+    });
+
+    // Update a donation request by ID
+    app.put("/donation-requests/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const data = { ...req.body };
+        delete data._id; // prevent _id modification
+
+        const result = await donationCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: data }
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ message: "Donation request not found" });
+        }
+
+        res.send({ message: "Donation request updated successfully" });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ message: "Internal Server Error" });
+      }
+    });
+
+
+
 
 
 
