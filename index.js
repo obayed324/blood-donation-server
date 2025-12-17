@@ -179,7 +179,7 @@ async function run() {
       }
     });
 
-    app.get("/donation-requests", verifyFBToken, async (req, res) => {
+    app.get("/donation-requests", async (req, res) => {
       try {
         const { status } = req.query;
         const filter = status ? { status: status } : {};
@@ -271,6 +271,78 @@ async function run() {
         res.status(500).send({ message: "Internal Server Error" });
       }
     });
+
+
+    app.delete("/donation-requests/:id", async (req, res) => {
+      const { ObjectId } = require("mongodb");
+      const { id } = req.params;
+
+      if (!ObjectId.isValid(id)) return res.status(400).send({ message: "Invalid ID" });
+
+      try {
+        const result = await donationCollection.deleteOne({ _id: new ObjectId(id) });
+        if (result.deletedCount === 0) return res.status(404).send({ message: "Not found" });
+        res.send({ message: "Deleted successfully" });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ message: "Internal Server Error" });
+      }
+    });
+
+
+    app.patch("/donation-requests/status/:id", async (req, res) => {
+      const { id } = req.params;
+      const { status } = req.body;
+
+      // allowed status values
+      const allowedStatus = ["done", "canceled"];
+
+      if (!allowedStatus.includes(status)) {
+        return res.status(400).send({ message: "Invalid status" });
+      }
+
+      try {
+        const result = await donationCollection.updateOne(
+          { _id: new ObjectId(id), status: "inprogress" },
+          {
+            $set: { status },
+          }
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({
+            message: "Donation request not found or status not in progress",
+          });
+        }
+
+        res.send({
+          message: `Donation request marked as ${status}`,
+        });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Internal Server Error" });
+      }
+    });
+
+    //donor search API
+    app.get("/donors/search", async (req, res) => {
+      try {
+        const { bloodGroup, district, upazila } = req.query;
+
+        const query = {
+          bloodGroup,
+          district,
+          upazila,
+          status: "active",
+        };
+
+        const donors = await userCollection.find(query).toArray();
+        res.send(donors);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to search donors" });
+      }
+    });
+
 
 
 
