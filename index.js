@@ -6,8 +6,40 @@ require('dotenv').config();
 const app = express();
 const port = process.env.PORT || 3000;
 
+const admin = require("firebase-admin");
+
+
+const serviceAccount = require("./serviceAccountKey.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+
 app.use(cors());
 app.use(express.json());
+
+const verifyFBToken = async (req, res, next) => {
+  const token = req.headers.authorization;
+  console.log(req.headers.authorization);
+
+  if (!token) {
+    return res.status(401).send({ message: 'unauthorized access' })
+  }
+
+  try {
+    const idToken = token.split(' ')[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    console.log('decoded in the token', decoded);
+    req.decoded_email = decoded.email;
+    next();
+  }
+  catch (err) {
+    return res.status(401).send({ message: 'unauthorized access' })
+  }
+
+
+}
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.ayh9j9o.mongodb.net/?appName=Cluster0`;
 
@@ -110,7 +142,7 @@ async function run() {
           donationTime: request.donationTime,
           requestMessage: request.requestMessage,
 
-          status: "pending", 
+          status: "pending",
           donor: {
             name: null,
             email: null
@@ -131,18 +163,59 @@ async function run() {
       }
     });
 
-    app.get("/donation-requests", async (req, res) => {
+    app.get("/donation-requests",verifyFBToken, async (req, res) => {
       try {
         const { status } = req.query;
         const filter = status ? { status: status } : {};
         const requests = await donationCollection.find(filter).toArray();
         res.send(requests);
-      } 
+      }
       catch (err) {
         console.error(err);
         res.status(500).send({ message: "Internal Server Error" });
       }
     });
+
+    // Get donation request details (private)
+    app.get("/donation-requests/:id", async (req, res) => {
+      const { id } = req.params;
+
+      const result = await donationCollection.findOne({
+        _id: new ObjectId(id),
+      });
+
+      if (!result) {
+        return res.status(404).send({ message: "Donation request not found" });
+      }
+
+      res.send(result);
+    });
+
+
+    // Confirm donation
+    app.patch("/donation-requests/donate/:id", verifyFBToken, async (req, res) => {
+      const { id } = req.params;
+      const { donorName, donorEmail } = req.body;
+
+      const update = {
+        $set: {
+          status: "inprogress",
+          donor: {
+            name: donorName,
+            email: donorEmail,
+          },
+        },
+      };
+
+      const result = await donationCollection.updateOne(
+        { _id: new ObjectId(id) },
+        update
+      );
+
+      res.send(result);
+    });
+
+
 
 
 
@@ -156,7 +229,7 @@ async function run() {
 run().catch(console.dir);
 
 app.get('/', (req, res) => {
-  res.send('Server running');
+  res.send('Blood Donation server is running');
 });
 
 app.listen(port, () => {
