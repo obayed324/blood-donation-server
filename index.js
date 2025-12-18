@@ -3,12 +3,21 @@ const cors = require('cors');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config();
 
+const stripe = require('stripe')(process.env.STRIPE_SECRET);
+const crypto = require("crypto");
+
+function generateTrackingId() {
+  const prefix = "PRCL"; // your brand prefix
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, ""); // YYYYMMDD
+  const random = crypto.randomBytes(3).toString("hex").toUpperCase(); // 6-char random hex
+
+  return `${prefix}-${date}-${random}`;
+}
+
 const app = express();
 const port = process.env.PORT || 3000;
 
 const admin = require("firebase-admin");
-
-
 const serviceAccount = require("./serviceAccountKey.json");
 
 admin.initializeApp({
@@ -57,6 +66,7 @@ async function run() {
     const db = client.db('blood-donation');
     const userCollection = db.collection('users');
     const donationCollection = db.collection("donationRequests");
+    const paymentCollection = db.collection('payments');
 
 
     // Create user (on first login)
@@ -341,6 +351,116 @@ async function run() {
       } catch (error) {
         res.status(500).send({ message: "Failed to search donors" });
       }
+    });
+
+    //payment related API
+
+    app.post('/payment-checkout-session', async (req, res) => {
+      try {
+        const { amount, donorEmail, donorName, role } = req.body;
+
+        const donationAmount = parseInt(amount) * 100; // Stripe uses smallest unit
+
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ['card'],
+          line_items: [
+            {
+              price_data: {
+                currency: 'bdt',
+                unit_amount: donationAmount,
+                product_data: {
+                  name: 'Blood Donation Funding',
+                  description: 'Supporting blood donation and emergency patients',
+                },
+              },
+              quantity: 1,
+            },
+          ],
+          mode: 'payment',
+
+          metadata: {
+            donorName,
+            role,
+            purpose: 'blood-donation-funding',
+          },
+
+          customer_email: donorEmail,
+
+          success_url: `${process.env.SITE_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${process.env.SITE_DOMAIN}/payment-cancelled`,
+        });
+
+        res.send({ url: session.url });
+      } catch (error) {
+        res.status(500).send({ message: 'Payment session failed' });
+      }
+    });
+
+    app.patch('/payment-success', async (req, res) => {
+      try {
+        const sessionId = req.query.session_id;
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+        const transactionId = session.payment_intent;
+
+        // prevent duplicate payment save
+        const paymentExist = await paymentCollection.findOne({
+          transactionId,
+        });
+
+        if (paymentExist) {
+          return res.send({
+            message: 'already exists',
+            transactionId,
+          });
+        }
+
+        if (session.payment_status === 'paid') {
+          const donation = {
+            amount: session.amount_total / 100,
+            currency: session.currency,
+            donorEmail: session.customer_email,
+            donorName: session.metadata.donorName,
+            role: session.metadata.role,
+            transactionId: session.payment_intent,
+            paymentStatus: session.payment_status,
+            purpose: 'blood-donation',
+            paidAt: new Date(),
+          };
+
+          const result = await paymentCollection.insertOne(donation);
+
+          return res.send({
+            success: true,
+            transactionId,
+            donation: result,
+          });
+        }
+
+        res.send({ success: false });
+      } catch (error) {
+        res.status(500).send({ message: 'Payment verification failed' });
+      }
+    });
+
+    app.get('/payments', verifyFBToken, async (req, res) => {
+      const email = req.query.email;
+      const query = {};
+
+      if (email) {
+        query.donorEmail = email;
+
+        if (email !== req.decoded_email) {
+          return res.status(403).send({ message: 'forbidden access' });
+        }
+      }
+
+      const payments = await paymentCollection
+        .find(query)
+        .sort({ paidAt: -1 })
+        .toArray();
+
+      res.send(payments);
     });
 
 
