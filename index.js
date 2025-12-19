@@ -182,8 +182,8 @@ async function run() {
         }
 
         if (user.status !== "active") {
-          return res.status(403).send({
-            message: "Blocked users cannot create donation request"
+          return res.status(400).send({
+            message: "Blocked users cannot create donation request!! please contact with admin"
           });
         }
 
