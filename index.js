@@ -90,6 +90,18 @@ async function run() {
 
       next();
     }
+    const verifyVolunteer = async (req, res, next) => {
+      const email = req.user.email;
+
+      const user = await userCollection.findOne({ email });
+
+      if (user?.role !== "volunteer") {
+        return res.status(403).send({ message: "Forbidden access" });
+      }
+
+      next();
+    };
+
 
 
     // Create user (on first login)
@@ -573,11 +585,35 @@ async function run() {
       }
     });
 
+    
+    // Volunteer Dashboard Stats
+    app.get("/volunteer/stats", verifyFBToken, async (req, res) => {
+      try {
+        // Count all requests
+        const totalRequests = await donationCollection.countDocuments();
+
+        const pendingRequests = await donationCollection.countDocuments({
+          status: "pending",
+        });
+
+        const completedRequests = await donationCollection.countDocuments({
+          status: "done",
+        });
+
+        res.send({
+          totalRequests,
+          pendingRequests,
+          completedRequests,
+        });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Server error" });
+      }
+    });
 
 
 
-
-
+    
 
 
     console.log('MongoDB Connected');
