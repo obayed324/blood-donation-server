@@ -585,7 +585,7 @@ async function run() {
       }
     });
 
-    
+
     // Volunteer Dashboard Stats
     app.get("/volunteer/stats", verifyFBToken, async (req, res) => {
       try {
@@ -613,7 +613,48 @@ async function run() {
 
 
 
-    
+    // Update donation status - only allowed field: status
+    app.patch(
+      "/donation-requests/:id/status",
+      verifyFBToken, // authenticate user
+      async (req, res) => {
+        try {
+          const donationId = req.params.id;
+          const { status } = req.body;
+
+          if (!status) {
+            return res.status(400).send({ message: "Status is required" });
+          }
+
+          // Update only the status field
+          const result = await donationCollection.updateOne(
+            { _id: new ObjectId(donationId) },
+            { $set: { status } }
+          );
+
+          if (result.modifiedCount === 0) {
+            return res
+              .status(404)
+              .send({ message: "Donation request not found or status unchanged" });
+          }
+
+          res.send({ success: true, message: "Status updated", status });
+        } catch (err) {
+          console.error(err);
+          res.status(500).send({ message: "Failed to update status" });
+        }
+      }
+    );
+
+    app.get("/volunteer/donation-requests", verifyFBToken, async (req, res) => {
+      const result = await donationCollection
+        .find({})
+        .sort({ donationDate: -1 })
+        .toArray();
+
+      res.send(result);
+    });
+
 
 
     console.log('MongoDB Connected');
