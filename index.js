@@ -1,10 +1,23 @@
 const express = require('express');
 const cors = require('cors');
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const app = express();
 require('dotenv').config();
-
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const stripe = require('stripe')(process.env.STRIPE_SECRET);
+
+
+const port = process.env.PORT || 3000;
+
+
 const crypto = require("crypto");
+
+const admin = require("firebase-admin");
+const serviceAccount = require("./serviceAccountKey.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
 
 function generateTrackingId() {
   const prefix = "PRCL"; // your brand prefix
@@ -14,15 +27,13 @@ function generateTrackingId() {
   return `${prefix}-${date}-${random}`;
 }
 
-const app = express();
-const port = process.env.PORT || 3000;
 
-const admin = require("firebase-admin");
-const serviceAccount = require("./serviceAccountKey.json");
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
+
+
+
+
+
 
 
 app.use(cors());
@@ -68,11 +79,23 @@ async function run() {
     const donationCollection = db.collection("donationRequests");
     const paymentCollection = db.collection('payments');
 
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email };
+      const user = await userCollection.findOne(query);
+
+      if (!user || user.role !== 'admin') {
+        return res.status(403).send({ message: 'forbidden access' });
+      }
+
+      next();
+    }
+
 
     // Create user (on first login)
     app.post('/users', async (req, res) => {
       const user = req.body;
-      const exists = await users.findOne({ uid: user.uid });
+      const exists = await userCollection.findOne({ uid: user.uid });
       if (exists) return res.send(exists);
 
       const result = await userCollection.insertOne({
@@ -465,6 +488,90 @@ async function run() {
 
 
 
+
+    app.get('/admin/stats', verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        // 1️⃣ Total Users (Donors)
+        const totalUsers = await userCollection.countDocuments();
+
+        // 2️⃣ Total Blood Donation Requests
+        const totalRequests = await donationCollection.countDocuments();
+
+        // 3️⃣ Total Funding (sum of all payments)
+        const fundingResult = await paymentCollection.aggregate([
+          {
+            $group: {
+              _id: null,
+              totalFunding: { $sum: "$amount" },
+            },
+          },
+        ]).toArray();
+
+        const totalFunding = fundingResult[0]?.totalFunding || 0;
+
+        res.send({
+          totalUsers,
+          totalFunding,
+          totalRequests,
+        });
+      } catch (error) {
+        res.status(500).send({ message: "Failed to load admin statistics" });
+      }
+    });
+
+    //for all donation request
+    app.get("/admin/donation-requests", verifyFBToken, verifyAdmin, async (req, res) => {
+      const result = await donationCollection
+        .find({})
+        .sort({ donationDate: -1 })
+        .toArray();
+
+      res.send(result);
+    });
+
+    app.get("/admin/users", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const users = await userCollection.find({}).toArray();
+        res.send(users);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ message: "Internal Server Error" });
+      }
+    });
+
+    app.patch("/admin/users/:id/status", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const { status } = req.body; // "active" or "blocked"
+        const userId = req.params.id;
+
+        await userCollection.updateOne(
+          { _id: new ObjectId(userId) },
+          { $set: { status } }
+        );
+
+        res.send({ success: true, status });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ message: "Internal Server Error" });
+      }
+    });
+
+    app.patch("/admin/users/:id/role", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const { role } = req.body; // "volunteer" or "admin"
+        const userId = req.params.id;
+
+        await userCollection.updateOne(
+          { _id: new ObjectId(userId) },
+          { $set: { role } }
+        );
+
+        res.send({ success: true, role });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ message: "Internal Server Error" });
+      }
+    });
 
 
 
