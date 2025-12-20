@@ -91,16 +91,19 @@ async function run() {
       next();
     }
     const verifyVolunteer = async (req, res, next) => {
-      const email = req.user.email;
+      const email = req.decoded_email;
+      console.log(email)
 
       const user = await userCollection.findOne({ email });
+      console.log(user);
 
-      if (user?.role !== "volunteer") {
-        return res.status(403).send({ message: "Forbidden access" });
+      if (!user || user.role !== "volunteer") {
+        return res.status(400).send({ message: "Forbidden access" });
       }
 
       next();
     };
+
 
 
 
@@ -121,14 +124,14 @@ async function run() {
     });
 
     //for fetch profile information 
-    app.get('/users/uid/:uid', async (req, res) => {
+    app.get('/users/uid/:uid', verifyFBToken, async (req, res) => {
       const user = await userCollection.findOne({ uid: req.params.uid });
       if (!user) return res.status(404).send({ message: 'User not found' });
       res.send(user);
     });
 
-    //for user based login 
-    app.get("/users/role/:uid", async (req, res) => {
+    //for role based login 
+    app.get("/users/role/:uid", verifyFBToken, async (req, res) => {
       try {
         const user = await userCollection.findOne({ uid: req.params.uid });
 
@@ -165,7 +168,7 @@ async function run() {
     });
 
     // Donation related API
-    app.post("/donation-requests", async (req, res) => {
+    app.post("/donation-requests", verifyFBToken, async (req, res) => {
       try {
         const request = req.body;
 
@@ -277,7 +280,7 @@ async function run() {
     });
 
     // Get donor dashboard data (last 3 requests)
-    app.get("/dashboard/my-donation-requests/:uid", async (req, res) => {
+    app.get("/dashboard/my-donation-requests/:uid", verifyFBToken, async (req, res) => {
       const { uid } = req.params;
 
       try {
@@ -295,7 +298,7 @@ async function run() {
     });
 
     // Update a donation request by ID
-    app.put("/donation-requests/:id", async (req, res) => {
+    app.put("/donation-requests/:id", verifyFBToken, async (req, res) => {
       try {
         const id = req.params.id;
         const data = { ...req.body };
@@ -318,7 +321,7 @@ async function run() {
     });
 
 
-    app.delete("/donation-requests/:id", async (req, res) => {
+    app.delete("/donation-requests/:id", verifyFBToken, async (req, res) => {
       const { ObjectId } = require("mongodb");
       const { id } = req.params;
 
@@ -335,7 +338,7 @@ async function run() {
     });
 
 
-    app.patch("/donation-requests/status/:id", async (req, res) => {
+    app.patch("/donation-requests/status/:id", verifyFBToken, async (req, res) => {
       const { id } = req.params;
       const { status } = req.body;
 
@@ -390,7 +393,7 @@ async function run() {
 
     //payment related API
 
-    app.post('/payment-checkout-session', async (req, res) => {
+    app.post('/payment-checkout-session', verifyFBToken, async (req, res) => {
       try {
         const { amount, donorEmail, donorName, role } = req.body;
 
@@ -431,7 +434,7 @@ async function run() {
       }
     });
 
-    app.patch('/payment-success', async (req, res) => {
+    app.patch('/payment-success', verifyFBToken, async (req, res) => {
       try {
         const sessionId = req.query.session_id;
         const session = await stripe.checkout.sessions.retrieve(sessionId);
@@ -614,42 +617,42 @@ async function run() {
 
 
     // Update donation status - only allowed field: status
-    app.patch(
-      "/donation-requests/:id/status",
-      verifyFBToken, // authenticate user
-      async (req, res) => {
-        try {
-          const donationId = req.params.id;
-          const { status } = req.body;
+    app.patch("/donation-requests/:id/status", verifyFBToken, verifyVolunteer, async (req, res) => {
+      try {
+        const donationId = req.params.id;
+        const { status } = req.body;
 
-          if (!status) {
-            return res.status(400).send({ message: "Status is required" });
-          }
-
-          // Update only the status field
-          const result = await donationCollection.updateOne(
-            { _id: new ObjectId(donationId) },
-            { $set: { status } }
-          );
-
-          if (result.modifiedCount === 0) {
-            return res
-              .status(404)
-              .send({ message: "Donation request not found or status unchanged" });
-          }
-
-          res.send({ success: true, message: "Status updated", status });
-        } catch (err) {
-          console.error(err);
-          res.status(500).send({ message: "Failed to update status" });
+        if (!status) {
+          return res.status(400).send({ message: "Status is required" });
         }
+
+        // Update only the status field
+        const result = await donationCollection.updateOne(
+          { _id: new ObjectId(donationId) },
+          { $set: { status } }
+        );
+
+        if (result.modifiedCount === 0) {
+          return res
+            .status(404)
+            .send({ message: "Donation request not found or status unchanged" });
+        }
+
+        res.send({ success: true, message: "Status updated", status });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ message: "Failed to update status" });
       }
+    }
     );
 
     app.get("/volunteer/donation-requests", verifyFBToken, async (req, res) => {
       const result = await donationCollection
         .find({})
-        .sort({ donationDate: -1 })
+        .sort({
+          createdAt
+            : -1
+        })
         .toArray();
 
       res.send(result);
