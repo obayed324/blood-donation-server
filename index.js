@@ -93,19 +93,6 @@ async function run() {
 
       next();
     }
-    const verifyVolunteer = async (req, res, next) => {
-      const email = req.decoded_email;
-      console.log(email)
-
-      const user = await userCollection.findOne({ email });
-      console.log(user);
-
-      if (!user || user.role !== "volunteer") {
-        return res.status(400).send({ message: "Forbidden access" });
-      }
-
-      next();
-    };
 
 
 
@@ -620,7 +607,7 @@ async function run() {
 
 
     // Update donation status - only allowed field: status
-    app.patch("/donation-requests/:id/status", verifyFBToken, verifyVolunteer, async (req, res) => {
+    app.patch("/donation-requests/:id/status", verifyFBToken, async (req, res) => {
       try {
         const donationId = req.params.id;
         const { status } = req.body;
